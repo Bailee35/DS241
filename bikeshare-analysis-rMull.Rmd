@@ -1,0 +1,222 @@
+---
+title: "Bikeshare"
+author: "Bailee Mull"
+date: "18 10 2020"
+output: html_notebook
+---
+
+The goal of this analysis is to be able to analyze bikeshare data
+
+Prepare workspace:
+
+## Load packages
+
+```{r}
+library(tidyverse)
+library(janitor)
+library(readxl)
+library(skimr)
+library(summarytools)
+library(lubridate)
+library(tidyr)
+library(ggplot2)
+library(sp)
+library(sf)
+library(rgdal)
+```
+
+##Data
+
+The data source from capital bikeshare
+
+## Read the data
+
+```{r}
+dfa= read_excel("202008-capitalbikeshare-tripdata-newdata.xlsx", sheet =2) %>% clean_names()
+```
+
+```{r}
+skim(dfa)
+```
+
+
+## Tidy 
+
+Non Needed
+
+## Subsetting to data of interest.
+
+We will get rid of the following variables:
+
+*ride-id
+
+
+```{r}
+dfb=dfa %>% select(-ride_id)
+```
+## Ceaning
+
+```{r}
+dfc=dfb %>% filter(duration>0, duration<1440)
+```
+
+```{r}
+dfc %>% filter(duration<300)%>% ggplot(aes(duration)) +geom_histogram(binwidth=1)
+```
+
+```{r}
+dfsorted= dfc %>% dplyr::arrange(duration)
+```
+
+## facet_wrap
+
+```{r}
+dfb %>% ggplot(aes(x=duration)) + geom_histogram(bins=1000) + facet_wrap(vars(weekday))
+```
+
+```{r}
+dfc %>% ggplot(aes(x=started_at,y=duration))+ geom_point()
+```
+
+```{r}
+dfc %>% ggplot(aes(x=hour,y=duration))+ geom_point()
+```
+
+
+```{r}
+dfe=dfb %>% filter(mday(started_at)==3) %>% slice_sample(n=100)
+```
+
+## Designing an algorithm
+
+Only start and end times
+
+```{r}
+dfe %>% select(start=started_at,end=ended_at)
+```
+
+Create a long dataset
+
+```{r}
+dfe %>% select(start=started_at,end=ended_at) %>% pivot_longer(start:end)
+```
+
+Pick good names, then order by time
+
+```{r}
+dfe %>% select(start=started_at,end=ended_at) %>% pivot_longer(start:end, names_to="type",values_to="t") %>% arrange(t)
+```
+
+```{r}
+dfe %>% select(start=started_at,end=ended_at) %>% pivot_longer(start:end, names_to="type" ,values_to="t") %>% arrange(t) %>% mutate(increment=case_when(type=="start"~1,type=="end"~-1))
+```
+
+Cummlative sum of that colum
+
+```{r}
+dfe %>% select(start=started_at,end=ended_at) %>% pivot_longer(start:end, names_to="type",values_to="t") %>% arrange(t) %>% mutate(increment=case_when(type=="start"~1, type=="end"~-1)) %>% mutate(riders=cumsum(increment)) 
+```
+
+```{r}
+dfe %>% select(start=started_at,end=ended_at) %>% pivot_longer(start:end, names_to="type",values_to="t") %>% arrange(t) %>% mutate(increment=case_when(type=="start"~1, type=="end"~-1)) %>% mutate(riders=cumsum(increment)) %>% ggplot(aes(t,riders)) + geom_step()
+```
+One day started on day three and didn't get returned until the fifth of August.
+
+```{r}
+dfb %>% filter(mday(started_at)==3) %>% select(start=started_at,end=ended_at) %>% pivot_longer(start:end, names_to="type",values_to="t") %>% arrange(t) %>% mutate(increment=case_when(type=="start"~1, type=="end"~-1)) %>% mutate(riders=cumsum(increment)) %>% ggplot(aes(t,riders)) + geom_step() + scale_x_datetime(limits=as_datetime(c("2020-08-03","2020-08-04")))
+```
+
+Whole range
+
+```{r}
+dfb %>% select(start=started_at,end=ended_at) %>% pivot_longer(start:end, names_to="type",values_to="t") %>% arrange(t) %>% mutate(increment=case_when(type=="start"~1, type=="end"~-1)) %>% mutate(riders=cumsum(increment)) %>% ggplot(aes(t,riders)) + geom_step()
+```
+
+```{r}
+dfb %>% filter(month(started_at)==8,month(ended_at)==8) %>% select(start=started_at,end=ended_at) %>% pivot_longer(start:end, names_to="type",values_to="t") %>% arrange(t) %>% mutate(increment=case_when(type=="start"~1, type=="end"~-1)) %>% mutate(riders=cumsum(increment)) %>% ggplot(aes(t,riders)) + geom_step() + facet_wrap(~mday(t),scales= "free_x",ncol= 7)
+```
+
+## Separating eletric and docked bikes
+
+```{r}
+dfb %>% filter(month(started_at)==8,month(ended_at)==8) %>% select(rideable_type,start=started_at,end=ended_at) %>% pivot_longer(start:end, names_to="type",values_to="t") %>% arrange(t) %>% mutate(increment=case_when(type=="start"~1, type=="end"~-1)) %>% group_by(rideable_type) %>% mutate(riders=cumsum(increment)) %>% filter(mday(t)<=7) %>% ggplot(aes(t,riders,color=rideable_type)) + geom_step() + facet_wrap(~mday(t),scales= "free_x",ncol= 7)
+```
+
+## BOx and whisker plot for trip duration based on "hour
+
+```{r}
+dfb %>% filter(duration<60) %>% ggplot(aes(x=hour,y=duration,group=hour)) + geom_boxplot()
+```
+
+Adjustment to 31 mini graphs
+
+```{r}
+dfb %>% filter(month(started_at)==8,month(ended_at)==8) %>% select(start=started_at,end=ended_at) %>% pivot_longer(start:end, names_to="type",values_to="t") %>% arrange(t) %>% mutate(increment=case_when(type=="start"~1, type=="end"~-1)) %>% mutate(riders=cumsum(increment)) %>% ggplot(aes(t,riders)) + geom_step() + facet_wrap(~mday(t),scales= "free_x",ncol= 7) + theme(axis.text.x = element_blank())
+```
+Another adjustment to 31 mini graphs
+
+```{r}
+dfb %>% filter(month(started_at)==8,month(ended_at)==8,mday(started_at)<=14) %>% select(start=started_at,end=ended_at) %>% pivot_longer(start:end, names_to="type",values_to="t") %>% arrange(t) %>% mutate(increment=case_when(type=="start"~1, type=="end"~-1)) %>% mutate(riders=cumsum(increment)) %>% ggplot(aes(t,riders)) + geom_step() + facet_wrap(~mday(t),scales= "free_x",ncol= 7) + theme(axis.text.x = element_blank())
+```
+
+Looking at changing day from 03-04 to 09-10
+
+```{r}
+dfb %>% filter(mday(started_at)==9) %>% select(start=started_at,end=ended_at) %>% pivot_longer(start:end, names_to="type",values_to="t") %>% arrange(t) %>% mutate(increment=case_when(type=="start"~1, type=="end"~-1)) %>% mutate(riders=cumsum(increment)) %>% ggplot(aes(t,riders)) + geom_step() + scale_x_datetime(limits=as_datetime(c("2020-08-09","2020-08-10")))
+```
+
+Changing day again
+
+```{r}
+dfb %>% filter(mday(started_at)==2) %>% select(start=started_at,end=ended_at) %>% pivot_longer(start:end, names_to="type",values_to="t") %>% arrange(t) %>% mutate(increment=case_when(type=="start"~1, type=="end"~-1)) %>% mutate(riders=cumsum(increment)) %>% ggplot(aes(t,riders)) + geom_step() + scale_x_datetime(limits=as_datetime(c("2020-08-02","2020-08-03")))
+```
+
+## Looking at eletric vs. docke bikes again
+
+```{r}
+dfr=dfb %>% filter(month(started_at)==8,month(ended_at)==8) %>% select(rideable_type,start=started_at,end=ended_at) %>% pivot_longer(start:end, names_to="type",values_to="t") %>% arrange(t) %>% mutate(increment=case_when(type=="start"~1, type=="end"~-1)) %>% group_by(rideable_type) %>% mutate(riders=cumsum(increment))
+```
+
+```{r}
+dfr1=dfb %>% filter(month(started_at)==8,month(ended_at)==8) %>% select(start=started_at,end=ended_at) %>% pivot_longer(start:end, names_to="type",values_to="t") %>% arrange(t) %>% mutate(increment=case_when(type=="start"~1, type=="end"~-1)) %>% mutate(riders=cumsum(increment))
+```
+
+How many riders (max) in any hour time interval?
+
+```{r}
+dfrh=dfr1 %>% group_by(hour(t),weekdays(t)) %>% summarise(max_riders=max(riders),ave=mean(riders))
+```
+
+## Group 1 mapping steps
+
+```{r}
+DC <- readOGR("Preliminary_2020_Census_Tract.csv","Preliminary_2020_Census_Tract.csv". verbose = F)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
